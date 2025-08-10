@@ -66,27 +66,33 @@ class AIAssistant:
         if not self.enabled:
             return {
                 "recommended_material": "песок",
-                "explanation": "Для получения персональных рекомендаций свяжитесь с нашим менеджером.",
-                "estimated_quantity": "уточнить"
+                "explanation": "ИИ недоступен. Свяжитесь с менеджером.",
+                "estimated_quantity": "5-10"
             }
             
         system_prompt = """
-        Ты - эксперт по строительным материалам. Помоги клиенту выбрать подходящий материал.
-        Доступные материалы:
-        - песок (песок речной мытый для фундаментов, бетона)
-        - песок_карьерный (песок карьерный для засыпки, выравнивания)
-        - щебень (щебень гранитный для дренажа, фундаментов, дорожек)
-        - щебень_известняковый (более дешевый вариант для дренажа)
-        - земля (земля растительная для садовых работ, газонов)
-        - глина (глина для дренажа, гидроизоляции)
-        
-        Отвечай кратко и по делу. Рекомендуй конкретный материал и примерное количество.
-        Формат ответа в JSON:
-        {
-            "recommended_material": "название_материала_из_списка_выше",
-            "explanation": "краткое объяснение выбора до 100 символов",
-            "estimated_quantity": "число от 1 до 50"
-        }
+Ты - эксперт по строительным материалам. Проанализируй запрос клиента и дай конкретную рекомендацию.
+
+ДОСТУПНЫЕ МАТЕРИАЛЫ (используй точно эти ключи):
+- песок - для фундаментов, бетонных работ, стяжек
+- песок_карьерный - для засыпки траншей, выравнивания участков
+- щебень - для дренажа, фундаментов, дорожек, отмосток
+- щебень_известняковый - бюджетный вариант для дренажа
+- земля - для газонов, клумб, садовых работ
+- глина - для гидроизоляции, дренажных работ
+
+ВАЖНО: 
+- Анализируй задачу клиента
+- Выбирай НАИБОЛЕЕ подходящий материал
+- Давай краткое, но содержательное объяснение ПОЧЕМУ именно этот материал
+- Указывай реалистичное количество
+
+Ответ строго в JSON:
+{
+  "recommended_material": "точное_название_из_списка_выше",
+  "explanation": "Краткое объяснение выбора (до 80 символов)",
+  "estimated_quantity": "число_от_1_до_100"
+}
         """
         
         try:
@@ -94,13 +100,14 @@ class AIAssistant:
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_query}
+                    {"role": "user", "content": f"Задача клиента: {user_query}"}
                 ],
-                max_tokens=200,
-                temperature=0.7
+                max_tokens=250,
+                temperature=0.3  # Снижаем температуру для более точных ответов
             )
             
             content = response.choices[0].message.content
+            logger.info(f"OpenAI ответ: {content}")
             
             # Попытка извлечь JSON из ответа
             try:
@@ -112,28 +119,64 @@ class AIAssistant:
                     result = json.loads(json_str)
                     
                     # Валидируем материал
-                    if result.get("recommended_material") not in Config.MATERIAL_PRICES:
-                        result["recommended_material"] = "песок"
+                    recommended = result.get("recommended_material", "песок")
+                    if recommended not in Config.MATERIAL_PRICES:
+                        logger.warning(f"Неизвестный материал от ИИ: {recommended}, использую песок")
+                        recommended = "песок"
+                        result["recommended_material"] = recommended
                     
+                    # Валидируем объяснение
+                    if not result.get("explanation") or len(result["explanation"]) < 10:
+                        material_info = Config.MATERIAL_PRICES[recommended]
+                        result["explanation"] = f"Подходит для ваших задач - {material_info['description'].lower()}"
+                    
+                    # Валидируем количество
+                    quantity = result.get("estimated_quantity", "5-10")
+                    if isinstance(quantity, str) and not any(c.isdigit() for c in quantity):
+                        result["estimated_quantity"] = "5-10"
+                    
+                    logger.info(f"Рекомендация ИИ: {result}")
                     return result
                 else:
                     raise json.JSONDecodeError("JSON not found", content, 0)
                     
-            except json.JSONDecodeError:
-                # Если не удалось распарсить JSON, возвращаем дефолтные значения
+            except json.JSONDecodeError as e:
+                logger.error(f"Ошибка парсинга JSON от OpenAI: {e}, content: {content}")
+                # Пытаемся извлечь информацию из текста
+                material = self._extract_material_from_text(content)
                 return {
-                    "recommended_material": "песок",
-                    "explanation": content[:100] if content else "Рекомендуем песок для большинства строительных работ",
-                    "estimated_quantity": "5-10"
+                    "recommended_material": material,
+                    "explanation": content[:80] if content else "Подходящий материал для ваших задач",
+                    "estimated_quantity": "5-15"
                 }
                 
         except Exception as e:
             logger.error(f"Ошибка при обращении к OpenAI: {e}")
             return {
                 "recommended_material": "песок",
-                "explanation": "Для консультации обратитесь к менеджеру",
-                "estimated_quantity": "уточнить"
+                "explanation": "Ошибка ИИ. Обратитесь к менеджеру за консультацией",
+                "estimated_quantity": "5-10"
             }
+    
+    def _extract_material_from_text(self, text: str) -> str:
+        """Извлечь материал из текста если JSON не распарсился"""
+        text_lower = text.lower()
+        
+        # Ищем ключевые слова для определения материала
+        if "фундамент" in text_lower or "бетон" in text_lower or "стяжка" in text_lower:
+            return "песок"
+        elif "дренаж" in text_lower or "дорожка" in text_lower or "отмостка" in text_lower:
+            return "щебень"
+        elif "засыпка" in text_lower or "выравнивание" in text_lower:
+            return "песок_карьерный"
+        elif "газон" in text_lower or "клумба" in text_lower or "сад" in text_lower:
+            return "земля"
+        elif "гидроизоляция" in text_lower:
+            return "глина"
+        elif "известняк" in text_lower or "бюджет" in text_lower:
+            return "щебень_известняковый"
+        
+        return "песок"  # По умолчанию
 
 class ConstructionMaterialsBot:
     def __init__(self):
@@ -165,7 +208,16 @@ class ConstructionMaterialsBot:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /start"""
+        
+        # Очищаем состояние пользователя при перезапуске
+        context.user_data.clear()
+        user_id = update.effective_user.id
+        if user_id in self.orders:
+            del self.orders[user_id]
+        
         welcome_message = """
+🤖 **БОТ ПЕРЕЗАПУЩЕН**
+
 🏗️ Добро пожаловать в сервис заказа строительных материалов!
 
 Я помогу вам:
@@ -175,6 +227,8 @@ class ConstructionMaterialsBot:
 • Связаться с менеджером
 
 Что вас интересует?
+
+➡️ Команда /start - перезапуск бота
         """
         
         keyboard = [
@@ -187,12 +241,16 @@ class ConstructionMaterialsBot:
         
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         
-        await update.message.reply_text(welcome_message, reply_markup=reply_markup)
+        await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode='Markdown')
         return ConversationHandler.END
 
     async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка текстовых сообщений"""
         text = update.message.text.lower()
+        
+        # Проверяем, не является ли это командой /start
+        if text.startswith('/start'):
+            return await self.start(update, context)
         
         if "заказать" in text or "материал" in text:
             return await self.start_order(update, context)
@@ -208,7 +266,8 @@ class ConstructionMaterialsBot:
                 return await self.ai_consultation(update, context)
             else:
                 await update.message.reply_text(
-                    "Не понял ваш запрос. Выберите опцию из меню или обратитесь к менеджеру."
+                    "Не понял ваш запрос. Выберите опцию из меню или обратитесь к менеджеру.\n\n"
+                    "💡 Используйте /start для перезапуска бота"
                 )
                 return ConversationHandler.END
 
@@ -229,7 +288,8 @@ class ConstructionMaterialsBot:
             price_text += f"  💵 {info['price']}₽ за {info['unit']}\n\n"
             
         price_text += "📍 *Цены указаны без учета доставки*\n"
-        price_text += "🚚 *Стоимость доставки рассчитывается индивидуально*"
+        price_text += "🚚 *Стоимость доставки рассчитывается индивидуально*\n\n"
+        price_text += "➡️ /start - перезапуск бота"
         
         await update.message.reply_text(price_text, parse_mode='Markdown')
 
@@ -246,6 +306,8 @@ class ConstructionMaterialsBot:
 
 🚚 Доставка по Москве и области
 ⚡ Срочная доставка в день заказа
+
+➡️ /start - перезапуск бота
         """
         await update.message.reply_text(contact_text, parse_mode='Markdown')
 
@@ -572,7 +634,10 @@ def main():
                 CONTACT_INPUT: [MessageHandler(filters.TEXT, bot.handle_contact_input)],
                 CONFIRMATION: [CallbackQueryHandler(bot.handle_confirmation)]
             },
-            fallbacks=[CommandHandler("start", bot.start)]
+            fallbacks=[
+                CommandHandler("start", bot.start),
+                MessageHandler(filters.Regex(r'^/start'), bot.start)
+            ]
         )
         
         # Добавляем обработчики
