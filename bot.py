@@ -544,7 +544,10 @@ def main():
     # Проверяем наличие токена
     if not Config.TELEGRAM_BOT_TOKEN or Config.TELEGRAM_BOT_TOKEN == 'your_bot_token_here':
         logger.error("TELEGRAM_BOT_TOKEN не установлен! Добавьте его в переменные окружения Railway.")
-        return
+        exit(1)
+        
+    # Получаем порт для Railway (если есть)
+    port = int(os.getenv('PORT', 8080))
     
     try:
         # Создаем экземпляр бота
