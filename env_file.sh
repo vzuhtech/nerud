@@ -1,0 +1,5 @@
+# Telegram Bot Token (обязательно)
+TELEGRAM_BOT_TOKEN=8323533826:AAFD0HsdzXmP-u8eb8Ge2ieQSNE6SZ-WVGU
+
+# OpenAI API Key (опционально, для ИИ функций)
+OPENAI_API_KEY=sk-proj-JZV2oG5Th03tq0w_mhBzMlaLvy3QP-V2_h5TpMoTTdpNpuxlNaepBVu8q_BCMQatOJuS5Wi3E1T3BlbkFJouzxQvhq2NZUflQvtsc
