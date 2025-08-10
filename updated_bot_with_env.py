@@ -23,9 +23,9 @@ MATERIAL_SELECTION, QUANTITY_INPUT, ADDRESS_INPUT, CONTACT_INPUT, CONFIRMATION =
 
 # Конфигурация (используем переменные окружения)
 class Config:
-    TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-    MANAGER_CHAT_ID = os.getenv('MANAGER_CHAT_ID')
+    TELEGRAM_BOT_TOKEN = os.getenv('T8323533826:AAFD0HsdzXmP-u8eb8Ge2ieQSNE6SZ-WVGU')
+    OPENAI_API_KEY = os.getenv('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')
+    MANAGER_CHAT_ID = os.getenv('5806904086')
     
     # Базовые цены за м³ (можно настроить)
     MATERIAL_PRICES = {
