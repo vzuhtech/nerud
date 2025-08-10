@@ -23,9 +23,10 @@ MATERIAL_SELECTION, QUANTITY_INPUT, ADDRESS_INPUT, CONTACT_INPUT, CONFIRMATION =
 
 # Конфигурация (используем переменные окружения)
 class Config:
-    TELEGRAM_BOT_TOKEN = os.getenv('T8323533826:AAFD0HsdzXmP-u8eb8Ge2ieQSNE6SZ-WVGU')
-    OPENAI_API_KEY = os.getenv('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')
-    MANAGER_CHAT_ID = os.getenv('5806904086')
+    # ИСПРАВЛЕНО: используем os.getenv() правильно
+    TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', 'T8323533826:AAFD0HsdzXmP-u8eb8Ge2ieQSNE6SZ-WVGU')
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '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')
+    MANAGER_CHAT_ID = os.getenv('MANAGER_CHAT_ID', '5806904086')
     
     # Базовые цены за м³ (можно настроить)
     MATERIAL_PRICES = {
@@ -52,14 +53,17 @@ class Order:
 
 class AIAssistant:
     def __init__(self, api_key: str):
-        if api_key:
-            openai.api_key = api_key
+        if api_key and api_key.startswith('sk-'):  # Проверяем валидность ключа
+            # Используем новый API OpenAI
+            self.client = openai.OpenAI(api_key=api_key)
+            self.enabled = True
         else:
-            logger.warning("OpenAI API ключ не найден. ИИ функции работать не будут.")
+            logger.warning("OpenAI API ключ не найден или неверный. ИИ функции работать не будут.")
+            self.enabled = False
         
     async def get_material_recommendation(self, user_query: str) -> Dict[str, Any]:
         """Получить рекомендацию ИИ по материалам"""
-        if not Config.OPENAI_API_KEY:
+        if not self.enabled:
             return {
                 "recommended_material": "песок",
                 "explanation": "Для получения персональных рекомендаций свяжитесь с нашим менеджером.",
@@ -69,12 +73,12 @@ class AIAssistant:
         system_prompt = """
         Ты - эксперт по строительным материалам. Помоги клиенту выбрать подходящий материал.
         Доступные материалы:
-        - Песок речной мытый (для фундаментов, бетона)
-        - Песок карьерный (для засыпки, выравнивания)
-        - Щебень гранитный (для дренажа, фундаментов, дорожек)
-        - Щебень известняковый (более дешевый вариант для дренажа)
-        - Земля растительная (для садовых работ, газонов)
-        - Глина (для дренажа, гидроизоляции)
+        - песок (песок речной мытый для фундаментов, бетона)
+        - песок_карьерный (песок карьерный для засыпки, выравнивания)
+        - щебень (щебень гранитный для дренажа, фундаментов, дорожек)
+        - щебень_известняковый (более дешевый вариант для дренажа)
+        - земля (земля растительная для садовых работ, газонов)
+        - глина (глина для дренажа, гидроизоляции)
         
         Отвечай кратко и по делу. Рекомендуй конкретный материал и примерное количество.
         Формат ответа в JSON:
@@ -86,10 +90,7 @@ class AIAssistant:
         """
         
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=Config.OPENAI_API_KEY)
-            
-            response = client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -156,7 +157,7 @@ class ConstructionMaterialsBot:
                     ))
             keyboard.append(row)
             
-        if Config.OPENAI_API_KEY:
+        if self.ai_assistant.enabled:
             keyboard.append([InlineKeyboardButton("🤖 Консультация ИИ", callback_data="ai_help")])
         keyboard.append([InlineKeyboardButton("👨‍💼 Связаться с менеджером", callback_data="contact_manager")])
         
@@ -181,7 +182,7 @@ class ConstructionMaterialsBot:
             [KeyboardButton("💰 Узнать цены"), KeyboardButton("📞 Контакты")],
         ]
         
-        if Config.OPENAI_API_KEY:
+        if self.ai_assistant.enabled:
             keyboard.append([KeyboardButton("🤖 Помощь ИИ в выборе")])
         
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -203,7 +204,7 @@ class ConstructionMaterialsBot:
             return await self.ai_consultation(update, context)
         else:
             # Передаем неопознанный запрос ИИ (если доступно)
-            if Config.OPENAI_API_KEY:
+            if self.ai_assistant.enabled:
                 return await self.ai_consultation(update, context)
             else:
                 await update.message.reply_text(
@@ -250,7 +251,7 @@ class ConstructionMaterialsBot:
 
     async def ai_consultation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Консультация с ИИ"""
-        if not Config.OPENAI_API_KEY:
+        if not self.ai_assistant.enabled:
             await update.message.reply_text(
                 "🤖 ИИ консультант временно недоступен.\n"
                 "📞 Обратитесь к нашему менеджеру для персональной консультации!"
@@ -470,7 +471,7 @@ class ConstructionMaterialsBot:
             order = self.orders[user_id]
             
             # Отправить заказ менеджеру
-            await self.send_order_to_manager(order)
+            await self.send_order_to_manager(order, context.application)
             
             # Генерируем номер заказа
             order_number = str(order.user_id) + str(int(datetime.now().timestamp()))[-6:]
@@ -497,7 +498,7 @@ class ConstructionMaterialsBot:
             
         return ConversationHandler.END
 
-    async def send_order_to_manager(self, order: Order):
+    async def send_order_to_manager(self, order: Order, application):
         """Отправить заказ менеджеру"""
         try:
             material_info = Config.MATERIAL_PRICES[order.material]
@@ -523,8 +524,7 @@ class ConstructionMaterialsBot:
             # Отправить сообщение менеджеру (если настроен MANAGER_CHAT_ID)
             if Config.MANAGER_CHAT_ID:
                 try:
-                    app = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
-                    await app.bot.send_message(
+                    await application.bot.send_message(
                         chat_id=Config.MANAGER_CHAT_ID,
                         text=manager_message,
                         parse_mode='Markdown'
@@ -533,4 +533,62 @@ class ConstructionMaterialsBot:
                 except Exception as e:
                     logger.error(f"Ошибка отправки заказа менеджеру: {e}")
             else:
-                logger.warning("
+                logger.warning("MANAGER_CHAT_ID не настроен, заказ не отправлен менеджеру")
+                
+        except Exception as e:
+            logger.error(f"Ошибка обработки заказа: {e}")
+
+def main():
+    """Основная функция запуска бота"""
+    
+    # Проверяем наличие токена
+    if not Config.TELEGRAM_BOT_TOKEN or Config.TELEGRAM_BOT_TOKEN == 'your_bot_token_here':
+        logger.error("TELEGRAM_BOT_TOKEN не установлен! Добавьте его в переменные окружения Railway.")
+        return
+    
+    try:
+        # Создаем экземпляр бота
+        bot = ConstructionMaterialsBot()
+        
+        # Создаем приложение
+        application = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
+        
+        # Настраиваем ConversationHandler
+        conv_handler = ConversationHandler(
+            entry_points=[
+                CommandHandler("start", bot.start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text_message)
+            ],
+            states={
+                MATERIAL_SELECTION: [
+                    CallbackQueryHandler(bot.handle_material_selection),
+                    MessageHandler(filters.TEXT, bot.ai_consultation)
+                ],
+                QUANTITY_INPUT: [MessageHandler(filters.TEXT, bot.handle_quantity_input)],
+                ADDRESS_INPUT: [MessageHandler(filters.TEXT, bot.handle_address_input)],
+                CONTACT_INPUT: [MessageHandler(filters.TEXT, bot.handle_contact_input)],
+                CONFIRMATION: [CallbackQueryHandler(bot.handle_confirmation)]
+            },
+            fallbacks=[CommandHandler("start", bot.start)]
+        )
+        
+        # Добавляем обработчики
+        application.add_handler(conv_handler)
+        
+        # Логируем запуск
+        logger.info("Бот успешно запущен!")
+        logger.info(f"OpenAI API: {'включен' if bot.ai_assistant.enabled else 'выключен'}")
+        logger.info(f"Manager Chat ID: {Config.MANAGER_CHAT_ID}")
+        
+        # Запускаем бота
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True
+        )
+        
+    except Exception as e:
+        logger.error(f"Критическая ошибка запуска бота: {e}")
+        raise
+
+if __name__ == '__main__':
+    main()
